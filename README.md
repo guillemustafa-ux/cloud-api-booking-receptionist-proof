@@ -110,7 +110,7 @@ pages read do not state a deadline for that answer, and this README does not cla
 Each file in [`footguns/`](footguns/) is a small patch that reintroduces one real mistake.
 `npm run footgun <name>` applies it, runs the whole suite, reverts it, and prints `PASS` only when
 **exactly** the tests listed in [`footguns/manifest.json`](footguns/manifest.json) fail and every
-other test stays green. All seven print `PASS` locally; CI has not yet run them.
+other test stays green. All seven print `PASS` locally and in CI.
 
 | Footgun | The mistake | Tests that fail |
 | --- | --- | --- |
@@ -132,7 +132,8 @@ With the row written after it, the simultaneous copy is processed and billed aga
 
 ## Run it
 
-Node 22.12 or later is declared in `engines`; exercised locally on Node 24.16 on Windows 11.
+Node 22.12 or later is declared in `engines`; exercised locally on Node 24.16 on Windows 11 and in
+CI on Node 22 (Ubuntu and Windows).
 No Docker, no API key, no network beyond npm.
 
 ```bash
@@ -152,8 +153,11 @@ the dead process printed its crash marker and no stack trace, so an uncaught exc
 for the crash.
 
 The workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the suite and the
-typecheck on Ubuntu and Windows with Node 22, and the footgun matrix on Ubuntu. **Not yet run in
-CI.**
+typecheck on Ubuntu and Windows with Node 22, and the footgun matrix on Ubuntu. The first run
+(2026-11-07) failed on Windows at `npm ci`: npm 10, bundled with Node 22, ran `node-gyp rebuild`
+for `better-sqlite3` although the package ships prebuilt binaries, and node-gyp found no Visual
+Studio it could use. [`.npmrc`](.npmrc) now sets `ignore-scripts=true` (no locked package declares
+an install script), and the run on that fix passed all nine jobs.
 
 To run the receiver yourself: `node --import tsx src/main.ts` with the variables listed at the top
 of [`src/main.ts`](src/main.ts) (names only in [`.env.example`](.env.example)). It prints
