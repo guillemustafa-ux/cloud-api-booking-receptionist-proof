@@ -80,6 +80,8 @@ describe('(b) the same POST, same bytes and signature, delivered 5 times', () =>
 describe('(c) two simultaneous deliveries of the same POST', () => {
   async function both() {
     world.cloud.noteInbound(BOOK.from, BOOK.at);
+    // The first LLM call is slow, so the second copy surely arrives while the first is in flight.
+    world.llm.failNext('delay 100');
     const d = signedDelivery(world.cloud.inboundPayload(BOOK));
     return (await Promise.all([world.cloud.redeliver(d), world.cloud.redeliver(d)])).map((r) => r.status);
   }
