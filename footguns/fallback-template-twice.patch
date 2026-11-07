@@ -1,8 +1,8 @@
 diff --git a/src/honest/schema.sql b/src/honest/schema.sql
-index 7c61e46..0c00435 100644
+index c6eb370..d48529f 100644
 --- a/src/honest/schema.sql
 +++ b/src/honest/schema.sql
-@@ -51,7 +51,7 @@ create table if not exists outbound (
+@@ -52,7 +52,7 @@ create table if not exists outbound (
    wamid              text unique,
    error_code         integer,
    error_message      text,

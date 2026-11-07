@@ -1,8 +1,8 @@
 diff --git a/src/honest/receptionist.ts b/src/honest/receptionist.ts
-index 14e2a6b..5d22f9a 100644
+index a9d886b..0b1bb3a 100644
 --- a/src/honest/receptionist.ts
 +++ b/src/honest/receptionist.ts
-@@ -152,11 +152,13 @@ export function createHonestReceptionist(opts: ReceptionistOptions): Receptionis
+@@ -167,11 +167,13 @@ export function createHonestReceptionist(opts: ReceptionistOptions): Receptionis
        return;
      }
      for (;;) {
@@ -17,11 +17,11 @@ index 14e2a6b..5d22f9a 100644
          if (err instanceof LlmCallError && err.outcome === 'rejected') {
            const last = attempt >= MAX_ATTEMPTS;
            endCall(callKey, 'failed', err.message, last ? 'failed' : undefined);
-@@ -168,6 +170,7 @@ export function createHonestReceptionist(opts: ReceptionistOptions): Receptionis
+@@ -183,6 +185,7 @@ export function createHonestReceptionist(opts: ReceptionistOptions): Receptionis
          return;
        }
        crashIfAt(opts.fault, 'after_charge');
 +      startCall(msg.id); // recorded once the provider has answered
-       const replyId = persistResult(msg, callKey, intent);
-       await deliverOutbound(replyId);
-       return;
+       let replyId: number;
+       try {
+         replyId = persistResult(msg, callKey, intent);

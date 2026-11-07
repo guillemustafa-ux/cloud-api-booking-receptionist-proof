@@ -1,8 +1,8 @@
 diff --git a/src/honest/receptionist.ts b/src/honest/receptionist.ts
-index 14e2a6b..9dfad3a 100644
+index a9d886b..198ac9f 100644
 --- a/src/honest/receptionist.ts
 +++ b/src/honest/receptionist.ts
-@@ -92,7 +92,7 @@ export function createHonestReceptionist(opts: ReceptionistOptions): Receptionis
+@@ -104,7 +104,7 @@ export function createHonestReceptionist(opts: ReceptionistOptions): Receptionis
      const conv = db.prepare('select last_inbound_at from conversations where wa_id = ?').get(p.waId) as
        | { last_inbound_at: string }
        | undefined;

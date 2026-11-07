@@ -18,8 +18,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const shell = process.platform === 'win32';
 const root = fileURLToPath(new URL('..', import.meta.url));
+// vitest's own entry, run by this Node without a shell: same command on every OS.
+const vitestEntry = join(root, 'node_modules', 'vitest', 'vitest.mjs');
 const manifest = JSON.parse(readFileSync(join(root, 'footguns', 'manifest.json'), 'utf8'));
 
 const name = process.argv[2];
@@ -77,10 +78,10 @@ function runSuite() {
   const dir = mkdtempSync(join(tmpdir(), 'booking-footgun-'));
   const report = join(dir, 'report.json');
   try {
-    spawnSync('npx', ['vitest', 'run', '--reporter=default', '--reporter=json', `--outputFile=${report}`], {
+    spawnSync(process.execPath, [vitestEntry, 'run', '--reporter=default', '--reporter=json', `--outputFile=${report}`], {
       cwd: root,
       stdio: 'inherit',
-      shell,
+      shell: false,
     });
     if (!existsSync(report)) return undefined;
     const results = JSON.parse(readFileSync(report, 'utf8'));
