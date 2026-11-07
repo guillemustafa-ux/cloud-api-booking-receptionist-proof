@@ -1,0 +1,27 @@
+{
+  "name": "cloud-api-booking-receptionist-proof",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "footgun": "node scripts/footgun.mjs",
+    "inspect": "tsx scripts/inspect.ts",
+    "live:claude": "tsx scripts/live-claude.ts",
+    "live:cloud-api": "tsx scripts/live-cloud-api.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
+    "better-sqlite3": "^13.0.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
