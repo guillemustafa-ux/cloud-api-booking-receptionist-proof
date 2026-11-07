@@ -76,7 +76,7 @@ export function createCloudApiClient(opts: CloudApiOptions): CloudApiClient {
         template: {
           name: t.name,
           language: { code: t.language },
-          components: [{ type: 'body', parameters: t.params.map((text) => ({ type: 'text', text })) }],
+          ...(t.params.length > 0 && { components: [{ type: 'body', parameters: t.params.map((text) => ({ type: 'text', text })) }] }),
         },
       }),
   };
