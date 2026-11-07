@@ -41,6 +41,8 @@ export interface FakeCloudApi {
   sends: SentMessage[];
   setReceiver(webhookUrl: string): void;
   setErrorMode(mode: ErrorMode): void;
+  /** Record a customer message in the fake's own window view (deliverInbound does this itself). */
+  noteInbound(from: string, at: Date): void;
   /** A customer message: updates the fake's window view, then delivers the signed webhook. */
   deliverInbound(m: { from: string; text: string; at: Date; id?: string; name?: string }): Promise<Delivery>;
   /** The same bytes and the same signature again. */
@@ -177,6 +179,11 @@ export async function startFakeCloudApi(opts: {
     });
   }
 
+  function noteInbound(from: string, at: Date) {
+    const prev = lastInboundAt.get(from);
+    if (!prev || prev < at) lastInboundAt.set(from, at);
+  }
+
   async function post(raw: Buffer, signature: string | undefined): Promise<number> {
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (signature !== undefined) headers['x-hub-signature-256'] = signature;
@@ -206,9 +213,9 @@ export async function startFakeCloudApi(opts: {
     setErrorMode: (m) => {
       mode = m;
     },
+    noteInbound,
     deliverInbound: (m) => {
-      const prev = lastInboundAt.get(m.from);
-      if (!prev || prev < m.at) lastInboundAt.set(m.from, m.at);
+      noteInbound(m.from, m.at);
       return deliver(inboundPayload({ ...m, id: m.id ?? wamid('IN') }));
     },
     redeliver: async (d) => ({ ...d, status: await post(d.raw, d.signature) }),

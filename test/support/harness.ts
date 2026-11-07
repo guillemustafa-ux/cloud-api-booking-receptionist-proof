@@ -10,7 +10,8 @@ import { createSimulatedLlm } from '../../src/llm/simulated.js';
 import { createNaiveReceptionist } from '../../src/naive/receptionist.js';
 import type { Receptionist } from '../../src/receptionist.js';
 import { createReceiver } from '../../src/server.js';
-import { startFakeCloudApi, type FakeCloudApi } from './fake-cloud-api.js';
+import { sign } from '../../src/signature.js';
+import { startFakeCloudApi, type Delivery, type FakeCloudApi } from './fake-cloud-api.js';
 import { startFakeLlm, type FakeLlm } from './fake-llm.js';
 
 export type Side = 'honest' | 'naive';
@@ -121,6 +122,11 @@ export async function startSide(
       receptionist.close();
     },
   };
+}
+
+/** A delivery built by hand (for example to send two copies at once), signed with the test secret. */
+export function signedDelivery(raw: Buffer): Delivery {
+  return { raw, signature: sign(APP_SECRET, raw), status: 0 };
 }
 
 export function readRows<T>(dbPath: string, sql: string, params: unknown[] = []): T[] {
