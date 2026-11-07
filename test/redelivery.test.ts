@@ -152,6 +152,7 @@ describe('(f) the LLM answers 500 (not billed), then succeeds', () => {
     expect((await world.cloud.redeliver(first)).status).toBe(200);
     expect(world.llm.charges()).toBe(1);
     expect(count(run, 'bookings')).toBe(1);
+    expect(replies()).toHaveLength(1);
   });
 });
 
