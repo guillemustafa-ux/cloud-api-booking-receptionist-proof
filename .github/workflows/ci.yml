@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # No API key, no Docker, no network beyond npm: the LLM and the Cloud API are local fakes.
+  suite:
+    name: "baseline (${{ matrix.os }}): suite and typecheck must pass"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+
+  # The suite is only trustworthy if it BITES. Each footgun reintroduces one real mistake;
+  # the runner exits 0 only when exactly the tests documented for it fail.
+  footgun-must-be-caught:
+    name: "footgun ${{ matrix.footgun }}: exactly its tests must fail"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        footgun:
+          - skip-signature-check
+          - no-inbox-dedupe
+          - ledger-after-call
+          - text-outside-window
+          - swallow-131047
+          - fallback-template-twice
+          - no-booking-unique
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run footgun -- ${{ matrix.footgun }}
