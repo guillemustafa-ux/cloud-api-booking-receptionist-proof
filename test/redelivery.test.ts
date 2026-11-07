@@ -59,8 +59,9 @@ describe('(b) the same POST, same bytes and signature, delivered 5 times', () =>
 
   it('(b) honest: 1 charge, 1 booking, 1 reply; the inbox row counts 5 deliveries', async () => {
     const run = await side('honest');
-    expect(await fiveTimes()).toEqual([200, 200, 200, 200, 200]);
+    const statuses = await fiveTimes();
     expect(world.llm.charges()).toBe(1);
+    expect(statuses).toEqual([200, 200, 200, 200, 200]);
     expect(count(run, 'bookings')).toBe(1);
     expect(replies()).toHaveLength(1);
     expect(run.rows('select deliveries from inbox')).toEqual([{ deliveries: 5 }]);
@@ -85,8 +86,9 @@ describe('(c) two simultaneous deliveries of the same POST', () => {
 
   it('(c) honest: 1 charge, 1 booking, 1 reply', async () => {
     const run = await side('honest');
-    expect(await both()).toEqual([200, 200]);
+    const statuses = await both();
     expect(world.llm.charges()).toBe(1);
+    expect(statuses).toEqual([200, 200]);
     expect(count(run, 'bookings')).toBe(1);
     expect(replies()).toHaveLength(1);
     expect(run.rows('select deliveries from inbox')).toEqual([{ deliveries: 2 }]);
