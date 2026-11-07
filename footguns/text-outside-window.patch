@@ -1,0 +1,13 @@
+diff --git a/src/honest/receptionist.ts b/src/honest/receptionist.ts
+index 14e2a6b..9dfad3a 100644
+--- a/src/honest/receptionist.ts
++++ b/src/honest/receptionist.ts
+@@ -92,7 +92,7 @@ export function createHonestReceptionist(opts: ReceptionistOptions): Receptionis
+     const conv = db.prepare('select last_inbound_at from conversations where wa_id = ?').get(p.waId) as
+       | { last_inbound_at: string }
+       | undefined;
+-    const open = windowOpen(conv ? new Date(conv.last_inbound_at) : undefined, now());
++    const open = conv !== undefined; // any known customer gets a text, however long ago they wrote
+     const [type, body, status, templateName] = open
+       ? (['text', p.text, 'pending', null] as const)
+       : p.slot !== undefined

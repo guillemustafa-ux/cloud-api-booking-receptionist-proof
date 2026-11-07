@@ -1,0 +1,12 @@
+diff --git a/src/honest/receptionist.ts b/src/honest/receptionist.ts
+index 14e2a6b..191fe9e 100644
+--- a/src/honest/receptionist.ts
++++ b/src/honest/receptionist.ts
+@@ -222,7 +222,6 @@ export function createHonestReceptionist(opts: ReceptionistOptions): Receptionis
+     async handleWebhook(payload: WebhookPayload) {
+       for (const msg of inboundMessages(payload)) {
+         const isNew = recordInbound(msg); // synchronous: committed before any await
+-        if (!isNew) continue; // a redelivery: counted on the existing row, nothing else runs
+         await processMessage(msg);
+       }
+       for (const s of statusUpdates(payload)) {

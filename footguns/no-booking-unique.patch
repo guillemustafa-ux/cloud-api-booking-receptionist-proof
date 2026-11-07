@@ -1,0 +1,13 @@
+diff --git a/src/honest/schema.sql b/src/honest/schema.sql
+index 7c61e46..5b5ddfb 100644
+--- a/src/honest/schema.sql
++++ b/src/honest/schema.sql
+@@ -33,7 +33,7 @@ create table if not exists llm_calls (
+ 
+ create table if not exists bookings (
+   id                 integer primary key autoincrement,
+-  inbound_message_id text not null unique, -- defense in depth: one booking per inbound message
++  inbound_message_id text not null,
+   wa_id              text not null,
+   slot               text not null,
+   name               text,

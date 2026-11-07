@@ -1,0 +1,38 @@
+{
+  "skip-signature-check": {
+    "description": "verifySignature returns true before looking at the header: any POST is processed, signed or not.",
+    "expectedFailures": [
+      "rejects missing header",
+      "rejects empty header",
+      "rejects wrong hmac",
+      "rejects body changed after signing",
+      "rejects signed with another secret",
+      "rejects header without the sha256= prefix",
+      "a receiver with no APP_SECRET configured accepts nothing"
+    ]
+  },
+  "no-inbox-dedupe": {
+    "description": "A conflict on the inbox row no longer stops processing: every redelivery calls the LLM again.",
+    "expectedFailures": ["(b) honest", "(c) honest", "(d) honest", "(e) honest"]
+  },
+  "ledger-after-call": {
+    "description": "The llm_calls row is written after the LLM answers, so a crash right after billing leaves no trace.",
+    "expectedFailures": ["(d) honest"]
+  },
+  "text-outside-window": {
+    "description": "Any known customer gets a free-form text, however long ago they last wrote.",
+    "expectedFailures": ["(i) honest"]
+  },
+  "swallow-131047": {
+    "description": "A failed send (Graph API error or failed status webhook) is dropped: no record, no template fallback.",
+    "expectedFailures": ["(j) honest", "(k) honest"]
+  },
+  "fallback-template-twice": {
+    "description": "outbound.fallback_of is not unique: a redelivered failed-status webhook sends a second template.",
+    "expectedFailures": ["(k) honest"]
+  },
+  "no-booking-unique": {
+    "description": "bookings.inbound_message_id is not unique: nothing in the database stops a second booking for one message.",
+    "expectedFailures": ["(g) honest"]
+  }
+}
