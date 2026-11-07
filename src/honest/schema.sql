@@ -26,6 +26,7 @@ create table if not exists llm_calls (
   attempt     integer not null,
   status      text not null,            -- started | done | failed | unknown
   intent_json text,
+  note        text,                     -- provider note, e.g. why an answer was read as `other`
   error       text,
   started_at  text not null,
   finished_at text
@@ -56,4 +57,14 @@ create table if not exists outbound (
   booking_id         integer references bookings (id),
   created_at         text not null,
   updated_at         text not null
+);
+
+-- A failed status whose wamid is not in outbound: not dropped, kept once per (wamid, status).
+create table if not exists orphan_statuses (
+  wamid       text not null,
+  status      text not null,
+  error_code  integer,
+  error_title text,
+  received_at text not null,
+  primary key (wamid, status)
 );

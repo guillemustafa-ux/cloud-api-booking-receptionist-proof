@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
 import { inspectDb } from '../src/honest/inspect.js';
 import { CUSTOMER, readRows, startWorld, type Side, type World } from './support/harness.js';
-import { killedBySigkill, startReceiverProcess } from './support/receiver-process.js';
+import type { CrashPoint } from '../src/crash.js';
+import { exitedAbruptly, hasStackTrace, startReceiverProcess } from './support/receiver-process.js';
 
 // S2 (d): the receiver process is killed for real (SIGKILL, separate process) after the LLM
 // billed and before the booking is written. The same POST is then redelivered to a fresh process
@@ -17,13 +18,13 @@ afterAll(async () => {
 
 const MESSAGE_ID = 'wamid.HBgLCRASH00001';
 
-async function crashThenRedeliver(side: Side) {
+async function crashThenRedeliver(side: Side, fault: CrashPoint = 'after_charge') {
   world.llm.reset();
   world.cloud.reset();
   const dbPath = world.newDbPath();
   const base = { side, dbPath, llmUrl: world.llm.url, cloudUrl: world.cloud.url };
 
-  const doomed = await startReceiverProcess({ ...base, fault: 'after_charge' });
+  const doomed = await startReceiverProcess({ ...base, fault });
   world.cloud.setReceiver(doomed.url);
   // The receiver runs on the real clock, so the message is "now": its reply is inside the window.
   world.clock.set(new Date());
@@ -45,7 +46,8 @@ describe('(d) receiver process killed after the LLM billed, before the booking w
   it('(d) honest: call unknown, message unconfirmed, 0 additional charges, 0 bookings, visible in inspect', async () => {
     const r = await crashThenRedeliver('honest');
     expect(r.death.crashedAt).toBe('after_charge');
-    expect(killedBySigkill(r.death)).toBe(true);
+    expect(exitedAbruptly(r.death)).toBe(true);
+    expect(hasStackTrace(r.death.output)).toBe(false);
     expect(r.first.status).toBe(0); // the connection died with the process: Meta would retry
 
     expect(r.second.status).toBe(200);
@@ -63,10 +65,28 @@ describe('(d) receiver process killed after the LLM billed, before the booking w
   it('(d) naive: the redelivery pays again and books: 2 charges, 1 booking, 1 reply', async () => {
     const r = await crashThenRedeliver('naive');
     expect(r.death.crashedAt).toBe('after_charge');
-    expect(killedBySigkill(r.death)).toBe(true);
+    expect(exitedAbruptly(r.death)).toBe(true);
+    expect(hasStackTrace(r.death.output)).toBe(false);
     expect(r.second.status).toBe(200);
     expect(world.llm.charges()).toBe(2);
     expect(r.rows('select count(*) as n from bookings')).toEqual([{ n: 1 }]);
     expect(world.cloud.sends.filter((m) => m.outcome === 'accepted')).toHaveLength(1);
+  });
+});
+
+describe('(m) receiver process killed right after the inbox insert, before the LLM call', () => {
+  it('(m) honest: nothing was billed, so the redelivery processes it: 1 charge, 1 booking, 1 reply, 2 deliveries', async () => {
+    const r = await crashThenRedeliver('honest', 'after_inbox');
+    expect(r.death.crashedAt).toBe('after_inbox');
+    expect(exitedAbruptly(r.death)).toBe(true);
+    expect(hasStackTrace(r.death.output)).toBe(false);
+    expect(r.first.status).toBe(0);
+
+    expect(r.second.status).toBe(200);
+    expect(world.llm.charges()).toBe(1);
+    expect(r.rows('select call_key, status from llm_calls')).toEqual([{ call_key: `${MESSAGE_ID}:1`, status: 'done' }]);
+    expect(r.rows('select status, deliveries from inbox')).toEqual([{ status: 'done', deliveries: 2 }]);
+    expect(r.rows('select count(*) as n from bookings')).toEqual([{ n: 1 }]);
+    expect(world.cloud.sends.filter((m) => m.type === 'text' && m.outcome === 'accepted')).toHaveLength(1);
   });
 });

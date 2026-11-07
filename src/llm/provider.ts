@@ -3,7 +3,10 @@
  * The reply text is composed by the receptionist from the intent, so the suite stays
  * deterministic under any provider.
  */
-export type Intent = { kind: 'book'; slot: string; name?: string } | { kind: 'other' };
+export type Intent =
+  | { kind: 'book'; slot: string; name?: string }
+  /** `note` says why, when the provider can tell (for example a refusal); the ledger keeps it. */
+  | { kind: 'other'; note?: string };
 
 export interface IntentInput {
   text: string;

@@ -44,7 +44,12 @@ export function createHonestReceptionist(opts: ReceptionistOptions): Receptionis
 
   sweepDeadCalls(db, iso());
 
-  /** Synchronous: committed before the caller reaches its first await. True for a first delivery. */
+  /**
+   * Synchronous: committed before the caller reaches its first await. True when this delivery must
+   * be processed: the first one, or a redelivery of a message that a dead process recorded but
+   * never started a call for (`received`, no llm_calls row: nothing can have been billed). In a live
+   * process that state never outlasts one synchronous step, so a concurrent copy cannot see it.
+   */
   const recordInbound = db.transaction((msg: InboundMessage): boolean => {
     const inserted =
       db
@@ -53,12 +58,19 @@ export function createHonestReceptionist(opts: ReceptionistOptions): Receptionis
            values (?, ?, ?, ?, ?, 'received', 1, ?) on conflict (message_id) do nothing`,
         )
         .run(msg.id, msg.from, msg.type, msg.body, msg.sentAt.toISOString(), iso()).changes === 1;
-    if (!inserted) db.prepare('update inbox set deliveries = deliveries + 1 where message_id = ?').run(msg.id);
+    let mustProcess = inserted;
+    if (!inserted) {
+      db.prepare('update inbox set deliveries = deliveries + 1 where message_id = ?').run(msg.id);
+      const { status, calls } = db
+        .prepare('select status, (select count(*) from llm_calls where message_id = ?) as calls from inbox where message_id = ?')
+        .get(msg.id, msg.id) as { status: string; calls: number };
+      mustProcess = status === 'received' && calls === 0;
+    }
     db.prepare(
       `insert into conversations (wa_id, last_inbound_at) values (?, ?)
        on conflict (wa_id) do update set last_inbound_at = max(last_inbound_at, excluded.last_inbound_at)`,
     ).run(msg.from, msg.sentAt.toISOString());
-    return inserted;
+    return mustProcess;
   });
 
   function startCall(messageId: string): { callKey: string; attempt: number } {
@@ -122,8 +134,11 @@ export function createHonestReceptionist(opts: ReceptionistOptions): Receptionis
 
   /** Intent, booking, ledger `done` and the pending reply: one transaction. */
   const persistResult = db.transaction((msg: InboundMessage, callKey: string, intent: Intent): number => {
-    db.prepare(`update llm_calls set status = 'done', intent_json = ?, finished_at = ? where call_key = ?`).run(
-      JSON.stringify(intent),
+    // A provider's note (for example why an answer was read as `other`) is kept next to the intent.
+    const { note, ...stored } = intent.kind === 'other' ? intent : { ...intent, note: undefined };
+    db.prepare(`update llm_calls set status = 'done', intent_json = ?, note = ?, finished_at = ? where call_key = ?`).run(
+      JSON.stringify(stored),
+      note ?? null,
       iso(),
       callKey,
     );
@@ -168,7 +183,14 @@ export function createHonestReceptionist(opts: ReceptionistOptions): Receptionis
         return;
       }
       crashIfAt(opts.fault, 'after_charge');
-      const replyId = persistResult(msg, callKey, intent);
+      let replyId: number;
+      try {
+        replyId = persistResult(msg, callKey, intent);
+      } catch (err) {
+        // The answer arrived and was paid for, but could not be recorded: the call must not stay `started`.
+        endCall(callKey, 'unknown', `answer received but not recorded: ${err instanceof Error ? err.message : String(err)}`, 'unconfirmed');
+        throw err;
+      }
       await deliverOutbound(replyId);
       return;
     }
@@ -221,15 +243,23 @@ export function createHonestReceptionist(opts: ReceptionistOptions): Receptionis
   return {
     async handleWebhook(payload: WebhookPayload) {
       for (const msg of inboundMessages(payload)) {
-        const isNew = recordInbound(msg); // synchronous: committed before any await
-        if (!isNew) continue; // a redelivery: counted on the existing row, nothing else runs
+        const mustProcess = recordInbound(msg); // synchronous: committed before any await
+        crashIfAt(opts.fault, 'after_inbox');
+        if (!mustProcess) continue; // a redelivery: counted on the existing row, nothing else runs
         await processMessage(msg);
       }
       for (const s of statusUpdates(payload)) {
         if (s.status !== 'failed') continue;
         const row = db.prepare('select id from outbound where wamid = ?').get(s.wamid) as { id: number } | undefined;
-        if (!row) continue;
-        const error = s.errors[0] ?? { code: 0, message: 'failed status without errors[]' };
+        const error = s.errors[0] ?? { code: 0, title: '', message: 'failed status without errors[]' };
+        if (!row) {
+          // Not a message this ledger sent (or sent from a lost copy of it): kept visible, once.
+          db.prepare(
+            `insert into orphan_statuses (wamid, status, error_code, error_title, received_at) values (?, ?, ?, ?, ?)
+             on conflict (wamid, status) do nothing`,
+          ).run(s.wamid, s.status, error.code, error.title || error.message, iso());
+          continue;
+        }
         await onSendFailed(row.id, error.code, error.message);
       }
     },

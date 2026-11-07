@@ -22,3 +22,17 @@ export function env(name: string, fallback = ''): string {
   const value = (process.env[name] ?? '').replace(/"/g, '').trim();
   return value === '' ? fallback : value;
 }
+
+/** The variable's value, which must be one of `allowed`; `fallback` when unset. Throws `unknown <NAME> <value>`. */
+export function envOneOf<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
+  const value = env(name, fallback);
+  if (!allowed.includes(value as T)) throw new Error(`unknown ${name} ${value} (allowed: ${allowed.join(', ')})`);
+  return value as T;
+}
+
+/** The variable's value; throws `missing required environment variable <NAME>` when unset or empty. */
+export function envRequired(name: string): string {
+  const value = env(name);
+  if (!value) throw new Error(`missing required environment variable ${name}`);
+  return value;
+}

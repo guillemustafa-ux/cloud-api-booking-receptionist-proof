@@ -3,6 +3,9 @@ import type { CrashPoint } from './crash.js';
 import type { Intent, LlmProvider } from './llm/provider.js';
 import type { WebhookPayload } from './webhook.js';
 
+export const SIDES = ['honest', 'naive'] as const;
+export type Side = (typeof SIDES)[number];
+
 /** Public interface shared by the honest receptionist and its naive twin: one suite drives both. */
 export interface Receptionist {
   /** Handle one verified webhook delivery (inbound messages and/or statuses). */

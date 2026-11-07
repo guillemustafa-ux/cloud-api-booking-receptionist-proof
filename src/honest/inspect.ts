@@ -2,12 +2,13 @@ import Database from 'better-sqlite3';
 
 const QUERIES: [string, string][] = [
   ['inbox', 'select message_id, wa_id, status, deliveries, sent_at, body from inbox order by first_seen_at, message_id'],
-  ['llm_calls', 'select call_key, status, intent_json, error from llm_calls order by started_at, call_key'],
+  ['llm_calls', 'select call_key, status, intent_json, note, error from llm_calls order by started_at, call_key'],
   ['bookings', 'select id, inbound_message_id, wa_id, slot, name from bookings order by id'],
   ['outbound', 'select id, kind, type, status, error_code, fallback_of, wamid, body from outbound order by id'],
+  ['orphan_statuses', 'select wamid, status, error_code, error_title, received_at from orphan_statuses order by received_at, wamid'],
 ];
 
-/** A readable dump of the honest receptionist's ledger: inbox, llm_calls, bookings, outbound. */
+/** A readable dump of the honest receptionist's ledger: inbox, llm_calls, bookings, outbound, orphan_statuses. */
 export function inspectDb(dbPath: string): string {
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {

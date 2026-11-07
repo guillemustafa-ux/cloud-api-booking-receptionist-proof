@@ -51,6 +51,8 @@ export interface FakeCloudApi {
   deliverRaw(raw: Buffer, signature: string | undefined): Promise<number>;
   /** Deliver every queued failed-status webhook (async mode). */
   deliverPendingStatuses(): Promise<Delivery[]>;
+  /** The documented failed-status payload (error 131047) for a wamid, as bytes. */
+  failedStatusPayload(wamid: string, recipient: string): Buffer;
   /** The documented inbound payload for a message, as bytes. */
   inboundPayload(m: { from: string; text: string; at: Date; id: string; name?: string }): Buffer;
   reset(): void;
@@ -226,6 +228,7 @@ export async function startFakeCloudApi(opts: {
       return out;
     },
     inboundPayload,
+    failedStatusPayload,
     reset: () => {
       sends.length = 0;
       lastInboundAt.clear();

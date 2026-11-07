@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { createCloudApiClient } from '../../src/cloud-api-client.js';
 import { createHonestReceptionist } from '../../src/honest/receptionist.js';
+import type { LlmProvider } from '../../src/llm/provider.js';
 import { createSimulatedLlm } from '../../src/llm/simulated.js';
 import { createNaiveReceptionist } from '../../src/naive/receptionist.js';
 import type { Receptionist } from '../../src/receptionist.js';
@@ -82,6 +83,8 @@ export interface Running {
   receptionist: Receptionist;
   url: string;
   dbPath: string;
+  /** Lines the receiver logged, kept out of the test output. */
+  logs: string[];
   /** Run a read-only query against this side's database. */
   rows<T = Record<string, unknown>>(sql: string, ...params: unknown[]): T[];
   close(): Promise<void>;
@@ -91,7 +94,7 @@ export interface Running {
 export async function startSide(
   world: World,
   side: Side,
-  opts: { appSecret?: string | null; llmTimeoutMs?: number } = {},
+  opts: { appSecret?: string | null; llmTimeoutMs?: number; llm?: LlmProvider } = {},
 ): Promise<Running> {
   world.llm.reset();
   world.cloud.reset();
@@ -99,7 +102,7 @@ export async function startSide(
   const dbPath = world.newDbPath();
   const options = {
     dbPath,
-    llm: createSimulatedLlm({ url: world.llm.url, timeoutMs: opts.llmTimeoutMs ?? 2_000 }),
+    llm: opts.llm ?? createSimulatedLlm({ url: world.llm.url, timeoutMs: opts.llmTimeoutMs ?? 2_000 }),
     cloud: createCloudApiClient(cloudClientOptions(world.cloud.url)),
     now: () => world.clock.now,
     templateName: TEMPLATE_NAME,
@@ -107,7 +110,8 @@ export async function startSide(
   };
   const receptionist = side === 'honest' ? createHonestReceptionist(options) : createNaiveReceptionist(options);
   const appSecret = opts.appSecret === null ? undefined : (opts.appSecret ?? APP_SECRET);
-  const server = createReceiver({ receptionist, appSecret, verifyToken: VERIFY_TOKEN });
+  const logs: string[] = [];
+  const server = createReceiver({ receptionist, appSecret, verifyToken: VERIFY_TOKEN, label: side, log: (line) => logs.push(line) });
   const url = await listen(server);
   world.cloud.setReceiver(url);
   return {
@@ -115,6 +119,7 @@ export async function startSide(
     receptionist,
     url,
     dbPath,
+    logs,
     rows: (sql, ...params) => readRows(dbPath, sql, params),
     close: async () => {
       server.closeAllConnections();

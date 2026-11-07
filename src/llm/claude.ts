@@ -33,13 +33,14 @@ const PROPOSE_BOOKING = {
  * Claude through the Messages API, with one strict tool `propose_booking` that returns the
  * structured intent. The current Opus model refuses a forced `tool_choice` (`any` / `tool`), so
  * the request uses `auto` plus a system instruction; `strict: true` keeps the arguments schema-valid,
- * and a response without the tool call is read as `other`.
+ * and a response without the tool call is read as `other`, with a `note` naming the `stop_reason`
+ * so the ledger can tell a refusal or a missing call from a real `other`.
  *
  * The SDK's automatic retries are off (`maxRetries: 0`): a retried request that already reached
  * the API may be billed again, and that decision belongs to the receptionist's ledger.
  */
-export function createClaudeLlm(opts: { apiKey: string; model?: string }): LlmProvider {
-  const client = new Anthropic({ apiKey: opts.apiKey, maxRetries: 0 });
+export function createClaudeLlm(opts: { apiKey: string; model?: string; baseURL?: string }): LlmProvider {
+  const client = new Anthropic({ apiKey: opts.apiKey, maxRetries: 0, ...(opts.baseURL && { baseURL: opts.baseURL }) });
   const model = opts.model || DEFAULT_ANTHROPIC_MODEL;
 
   return {
@@ -66,9 +67,10 @@ export function createClaudeLlm(opts: { apiKey: string; model?: string }): LlmPr
         throw err;
       }
 
-      if (response.stop_reason === 'refusal') return { kind: 'other' };
       const call = response.content.find((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === PROPOSE_BOOKING.name);
-      if (!call) return { kind: 'other' };
+      if (response.stop_reason === 'refusal' || !call) {
+        return { kind: 'other', note: `stop_reason=${response.stop_reason}; ${call ? 'propose_booking called' : 'no propose_booking call'}` };
+      }
       const args = call.input as { kind?: string; slot?: string; name?: string };
       if (args.kind !== 'book' || !args.slot) return { kind: 'other' };
       return args.name ? { kind: 'book', slot: args.slot, name: args.name } : { kind: 'book', slot: args.slot };

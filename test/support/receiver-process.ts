@@ -25,6 +25,8 @@ export function startReceiverProcess(opts: {
   llmUrl: string;
   cloudUrl: string;
   fault?: CrashPoint;
+  /** Overrides for the child's environment; an empty string counts as unset. */
+  extraEnv?: Record<string, string>;
 }): Promise<ReceiverProcess> {
   const child = spawn(process.execPath, ['--import', 'tsx', 'src/main.ts'], {
     cwd: repoRoot,
@@ -44,6 +46,7 @@ export function startReceiverProcess(opts: {
       TEMPLATE_LANGUAGE,
       FAULT: opts.fault ?? '',
       PORT: '0',
+      ...opts.extraEnv,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -51,7 +54,7 @@ export function startReceiverProcess(opts: {
   const exited = new Promise<ProcessExit>((resolve, reject) => {
     child.on('error', reject);
     child.on('exit', (code, signal) => {
-      const crashed = /crash: (after_charge)/.exec(output);
+      const crashed = /crash: (after_inbox|after_charge)/.exec(output);
       resolve({ code, signal, crashedAt: crashed?.[1] as CrashPoint | undefined, output });
     });
   });
@@ -79,7 +82,15 @@ export function startReceiverProcess(opts: {
   });
 }
 
-/** How the OS reports a process that SIGKILLed itself: a signal on POSIX, exit code 1 on Windows. */
-export function killedBySigkill(exit: ProcessExit): boolean {
+/**
+ * The process ended abruptly: SIGKILL on POSIX; on Windows exit code 1 with no signal, which an
+ * uncaught exception also produces. Callers pair it with `hasStackTrace` and the crash marker.
+ */
+export function exitedAbruptly(exit: ProcessExit): boolean {
   return process.platform === 'win32' ? exit.code === 1 && exit.signal === null : exit.signal === 'SIGKILL';
+}
+
+/** True when the output carries an error or a stack frame: an exception, not a SIGKILL. */
+export function hasStackTrace(output: string): boolean {
+  return /^\s+at |Error:/m.test(output);
 }

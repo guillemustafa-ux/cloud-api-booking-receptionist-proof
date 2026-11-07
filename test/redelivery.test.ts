@@ -122,6 +122,7 @@ describe('(e) the LLM bills, then the connection drops before the answer', () =>
     world.llm.failNext('drop-after-charge');
     const first = await world.cloud.deliverInbound(BOOK);
     expect(first.status).toBe(500);
+    expect(run.logs).toEqual([expect.stringMatching(/^\[naive\] webhook processing failed: llm call unknown/)]);
     expect((await world.cloud.redeliver(first)).status).toBe(200);
     expect(world.llm.charges()).toBe(2);
     expect(count(run, 'bookings')).toBe(1);
@@ -153,6 +154,39 @@ describe('(f) the LLM answers 500 (not billed), then succeeds', () => {
     expect(world.llm.charges()).toBe(1);
     expect(count(run, 'bookings')).toBe(1);
     expect(replies()).toHaveLength(1);
+  });
+});
+
+describe('(n) the LLM answered and billed, then recording the answer failed', () => {
+  it('(n) honest: the call ends unknown (never left started), the message unconfirmed; the redelivery pays nothing', async () => {
+    const run = await side('honest');
+    // A booking row for this message already exists, so the transaction that records the answer fails.
+    const db = new Database(run.dbPath);
+    db.prepare('insert into bookings (inbound_message_id, wa_id, slot, created_at) values (?, ?, ?, ?)').run(
+      BOOK.id,
+      CUSTOMER,
+      '2026-11-10 09:00',
+      T0.toISOString(),
+    );
+    db.close();
+
+    const first = await world.cloud.deliverInbound(BOOK);
+    expect(first.status).toBe(500);
+    expect(world.llm.charges()).toBe(1);
+    expect(run.rows('select call_key, status, error from llm_calls')).toEqual([
+      {
+        call_key: 'wamid.HBgLIN000001:1',
+        status: 'unknown',
+        error: 'answer received but not recorded: UNIQUE constraint failed: bookings.inbound_message_id',
+      },
+    ]);
+    expect(run.rows('select status from inbox')).toEqual([{ status: 'unconfirmed' }]);
+    expect(run.logs).toEqual([expect.stringMatching(/^\[honest\] webhook processing failed: UNIQUE constraint failed/)]);
+
+    expect((await world.cloud.redeliver(first)).status).toBe(200);
+    expect(world.llm.charges()).toBe(1);
+    expect(count(run, 'bookings')).toBe(1);
+    expect(world.cloud.sends).toHaveLength(0);
   });
 });
 

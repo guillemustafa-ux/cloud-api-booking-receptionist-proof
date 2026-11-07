@@ -9,6 +9,10 @@ export interface ReceiverOptions {
   appSecret: string | undefined;
   /** Token expected in `hub.verify_token`. Without it every verification request is refused. */
   verifyToken: string | undefined;
+  /** Prefix for log lines, e.g. the side: `[honest] ...`. */
+  label?: string;
+  /** Where log lines go; stderr by default. Tests pass a collector so the suite output stays clean. */
+  log?: (line: string) => void;
 }
 
 /**
@@ -21,6 +25,8 @@ export interface ReceiverOptions {
  *                  the tests). An error while processing answers 500, so the sender retries.
  */
 export function createReceiver(opts: ReceiverOptions): Server {
+  const log = opts.log ?? ((line: string) => void process.stderr.write(`${line}\n`));
+  const prefix = opts.label ? `[${opts.label}] ` : '';
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://receiver.local');
     if (url.pathname !== '/webhook') {
@@ -64,7 +70,7 @@ export function createReceiver(opts: ReceiverOptions): Server {
       await opts.receptionist.handleWebhook(payload);
       res.writeHead(200).end();
     } catch (err) {
-      process.stderr.write(`webhook processing failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      log(`${prefix}webhook processing failed: ${err instanceof Error ? err.message : String(err)}`);
       res.writeHead(500).end();
     }
   });

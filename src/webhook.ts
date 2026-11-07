@@ -50,7 +50,7 @@ export interface StatusUpdate {
   wamid: string;
   status: string;
   recipient: string;
-  errors: { code: number; message: string }[];
+  errors: { code: number; title: string; message: string }[];
 }
 
 export function inboundMessages(payload: WebhookPayload): InboundMessage[] {
@@ -71,7 +71,7 @@ export function statusUpdates(payload: WebhookPayload): StatusUpdate[] {
       wamid: s.id,
       status: s.status,
       recipient: s.recipient_id,
-      errors: (s.errors ?? []).map((e) => ({ code: e.code, message: e.message ?? e.title ?? '' })),
+      errors: (s.errors ?? []).map((e) => ({ code: e.code, title: e.title ?? '', message: e.message ?? e.title ?? '' })),
     })),
   );
 }
