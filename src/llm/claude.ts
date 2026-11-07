@@ -6,7 +6,7 @@ export const DEFAULT_ANTHROPIC_MODEL = 'claude-opus-5-5';
 
 const SYSTEM = [
   'You read one WhatsApp message sent to a booking receptionist and report what it asks for.',
-  'Always answer by calling the propose_booking tool exactly once.',
+  'Always answer with a single call to the propose_booking tool.',
   'kind is "book" only when the message asks to book a specific day and time; otherwise "other".',
   'slot is the requested local date and time as "YYYY-MM-DD HH:MM" (24-hour clock), resolving',
   'relative days such as "tuesday" or "tomorrow" against the current time you are given; empty when kind is "other".',
