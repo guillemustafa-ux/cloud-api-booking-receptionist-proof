@@ -2,8 +2,8 @@
 
 A booking receptionist for WhatsApp Business messaging on Meta's Cloud API, in Node + TypeScript
 with SQLite, showing that a **redelivered webhook neither books twice nor pays the LLM twice**, and
-that replies respect the **24-hour customer service window**, with error 131047 handled on both of
-its paths and left visible in the ledger. Tested with a fake LLM that bills over real HTTP, a fake
+that replies respect the **24-hour customer service window**, with error 131047 handled on both
+documented error paths (synchronous response and status webhook) and left visible in the ledger. Tested with a fake LLM that bills over real HTTP, a fake
 Cloud API that signs and redelivers webhooks, and a receiver process killed with `SIGKILL`
 mid-request.
 
@@ -11,7 +11,7 @@ mid-request.
 | --- | --- |
 | "Prevent duplicate texts and conflicting automations" | scenarios (b), (c), (d), (e): one charge, one booking, one reply per message; (k): one template per failed message |
 | "WhatsApp receptionist on Cloud API + Claude" | the receptionist itself; `LLM=claude` runs it on Claude (see [LIVE](#live)) |
-| "bought the official WhatsApp API, Chatwoot is not receiving messages (webhook/auth suspected)" | the verification handshake and the signature check a receiver has to pass, with every rejection case tested; Chatwoot itself is not part of this repo |
+| "bought the official WhatsApp API, Chatwoot is not receiving messages (webhook/auth suspected)" | the verification handshake and the signature check a receiver has to pass, with the rejection cases listed in the suite tested (missing, empty or prefix-less header, wrong HMAC, body changed after signing, another secret, no secret configured); Chatwoot itself is not part of this repo |
 
 ## What it proves
 
@@ -27,19 +27,24 @@ The honest receptionist (`src/honest/`) does four things:
 1. **Inbox first.** An `inbox` row keyed by the WhatsApp message id (`messages[].id`) is written
    with `INSERT ... ON CONFLICT DO NOTHING` synchronously, before any `await`, before the LLM is
    called and before any booking. A conflict is a redelivery: the row's `deliveries` counter goes
-   up, nothing else runs, and the receiver still answers `200`.
+   up, nothing else runs, and the receiver still answers `200`. One exception: a row still
+   `received` with no `llm_calls` row belonged to a process that died before calling the LLM.
+   Nothing can have been billed for it, so its redelivery is processed (scenario (m)).
 2. **A ledger row before every paid call.** An `llm_calls` row (`call_key = <message id>:<attempt>`,
    status `started`) is committed before the request leaves. The intent, the booking, the ledger's
    `done` state and the pending reply are then written in one transaction.
 3. **Unknown means stop, not retry.** A dropped connection or timeout marks the call `unknown` and
    the message `unconfirmed`. A call still `started` when a process opens the file belonged to a
-   process that died: it is marked the same way at start-up. Nothing calls the LLM again for that
-   message. An error status from the LLM (the fake does not bill those) is retried once.
+   process that died: it is marked the same way at start-up. An answer that arrived but could not
+   be recorded ends the same way, so no call stays `started` once its process knows better
+   (scenario (n)). Nothing calls the LLM again for that message. An error status from the LLM (the
+   fake does not bill those) is retried once.
 4. **The database refuses a second booking.** `bookings.inbound_message_id` is `UNIQUE`, so even
    with the inbox check gone a second booking for the same message fails.
 
-`npm run inspect -- <db>` prints the inbox, the calls, the bookings and the outbound messages, so
-an `unconfirmed` message and its call key are there to see.
+`npm run inspect -- <db>` prints the inbox, the calls (with a `note` when the LLM's answer was
+read as `other` for a stated reason, such as a refusal), the bookings, the outbound messages and
+the orphan statuses, so an `unconfirmed` message and its call key are there to see.
 
 The naive twin (`src/naive/`) is what a first version usually looks like: call the model for every
 delivery, save the booking, reply with a text. No inbox, no ledger before the call, no window
@@ -57,13 +62,16 @@ and [`test/crash.test.ts`](test/crash.test.ts). "Charges" are requests the fake 
 | --- | --- | --- |
 | (a) one inbound "book tuesday 15:00 for Ana" | 1, 1, 1 | 1, 1, 1 (the reply is a text) |
 | (b) the same POST, same bytes and signature, delivered 5 times | 5, 5, 5 | 1, 1, 1; the inbox row counts 5 deliveries |
-| (c) two simultaneous deliveries of the same POST | 2, 2, 2 | 1, 1, 1; the inbox row counts 2 deliveries |
+| (c) two simultaneous deliveries of the same POST (the first LLM call takes 100 ms) | 2, 2, 2 | 1, 1, 1; the inbox row counts 2 deliveries |
 | (d) receiver process `SIGKILL`ed after the LLM billed, before the booking; redelivered to a fresh process on the same file | 2, 1, 1 | 1, 0, 0; call `unknown`, message `unconfirmed`, both listed by `npm run inspect` |
+| (m) receiver process `SIGKILL`ed right after the inbox insert, before the LLM call; redelivered to a fresh process | not tested (no inbox) | 1, 1, 1; call `done`, the inbox row counts 2 deliveries |
 | (e) the LLM bills, then drops the connection; the delivery is redelivered | 2, 1, 1 (the first delivery answered `500`) | 1, 0, 0; call `unknown`, message `unconfirmed`, 2 deliveries |
 | (f) the LLM answers `500` (not billed), then succeeds | 1, 1, 1 (the first delivery answered `500`; the redelivery booked and replied) | 1, 1, 1; attempt 1 `failed`, attempt 2 `done`, 2 requests |
 | (g) a second booking for the same message, inserted straight into the database | not tested | refused: `UNIQUE constraint failed: bookings.inbound_message_id` |
+| (n) the LLM answered and billed, then recording the answer failed (a booking row for the message already existed); then redelivered | not tested | 1, 0 new, 0; the first delivery answered `500`, call `unknown` with the error text, message `unconfirmed`; the redelivery pays nothing |
 
 In (d) the one charge on the honest side is the one made before the crash; the redelivery adds none.
+In (m) the process died before any call, so the one charge is the redelivery's.
 In (f) the naive twin recovers by redelivery because the fake does not bill an error status; whether
 a real provider bills a given error status was not verified here.
 
@@ -73,8 +81,9 @@ Meta's documentation: "When the window closes, you can only send pre-approved te
 ([docs/sources.md](docs/sources.md)). The receptionist keeps `conversations.last_inbound_at` from
 every verified inbound `messages[].timestamp` and decides at send time: inside 24 hours a text,
 past it the template (`TEMPLATE_NAME`, `TEMPLATE_LANGUAGE`, the booking slot as its one body
-parameter). The clock is injectable; the tests step it across the boundary. Assertions in
-[`test/window.test.ts`](test/window.test.ts).
+parameter). At exactly 24 h the window counts as closed (the comparison is strict: inside means
+less than 24 h); the fake Cloud API applies the same rule. The clock is injectable; the tests step
+it across the boundary. Assertions in [`test/window.test.ts`](test/window.test.ts).
 
 The error-codes page says "Cloud API errors are returned either synchronously as a Graph API
 response, asynchronously via Webhook, or sometimes through both methods", and does not say which
@@ -85,10 +94,13 @@ window is open while the fake Cloud API's own view says it closed.
 | Scenario | Naive | Honest |
 | --- | --- | --- |
 | (h) reminder 23 h 59 m after the last inbound message | not tested | a text, `sent` |
+| (h2) reminder 24 h minus 1 ms after | not tested | a text, accepted |
+| (i2) reminder exactly 24 h after | not tested | the template, accepted |
 | (i) reminder 24 h 01 m after | a text, refused with 131047; `sendReminders()` throws and no record of the failed reminder exists | the template, slot `2026-11-10 15:00` as its body parameter, `sent` |
 | (j) synchronous 131047: a `400` with the documented error body | see (i) | reminder row `failed`, `error_code` 131047, its text kept; **one** template sent, linked by `fallback_of`; visible in `npm run inspect` |
 | (k) asynchronous 131047: `200` with a `wamid`, then a signed `statuses` webhook with `status: "failed"` | the status is not read: 0 templates, nothing records the failure | the row turns `failed` with 131047; **one** template; the redelivered status webhook sends no second one (`fallback_of` is `UNIQUE`) |
 | (l) messages at T0, T0 + 2 h, then an older one delivered late | not tested | `last_inbound_at` is T0 + 2 h and stays there |
+| (o) a failed status for a `wamid` this ledger did not send, delivered twice | not tested | one row in `orphan_statuses` (131047), nothing sent, shown by `npm run inspect` |
 
 The receiver processes a delivery and then answers `200`. That keeps the tests deterministic. The
 pages read do not state a deadline for that answer, and this README does not claim one.
@@ -103,16 +115,20 @@ other test stays green. All seven print `PASS` locally; CI has not yet run them.
 | Footgun | The mistake | Tests that fail |
 | --- | --- | --- |
 | `skip-signature-check` | `verifySignature` returns `true` before looking at the header | the six signature rejections and "a receiver with no APP_SECRET configured accepts nothing" |
-| `no-inbox-dedupe` | an inbox conflict no longer stops processing | (b) honest (5 charges), (c) honest, (d) honest, (e) honest (2 each) |
-| `ledger-after-call` | the `llm_calls` row is written after the LLM answers | (d) honest: after the crash there is no row at all |
-| `text-outside-window` | any known customer gets a text, however long ago they wrote | (i) honest |
+| `no-inbox-dedupe` | an inbox conflict no longer stops processing | (b) honest (5 charges); (c), (d), (e) honest (2 charges each); (n) honest (the redelivery calls the LLM again and answers `500`) |
+| `ledger-after-call` | the `llm_calls` row is written after the LLM answers | (c) honest (2 charges), (d) honest: after the crash there is no row at all |
+| `text-outside-window` | any known customer gets a text, however long ago they wrote | (i) honest, (i2) honest |
 | `swallow-131047` | a failed send is dropped: no record, no fallback | (j) honest, (k) honest |
 | `fallback-template-twice` | `outbound.fallback_of` is not unique | (k) honest: the redelivered status sends a second template |
-| `no-booking-unique` | `bookings.inbound_message_id` is not unique | (g) honest |
+| `no-booking-unique` | `bookings.inbound_message_id` is not unique | (g) honest, (n) honest (the existing booking no longer blocks the second) |
 
 Under `no-inbox-dedupe` the redeliveries in (b) also answer `500`: they reach the LLM, and then the
 `UNIQUE` booking column refuses the second booking. That is the defense in depth of point 4 doing
 its job after the money is already spent.
+
+Under `ledger-after-call`, (c) fails too: the inbox rule of point 1 treats a `received` row with no
+call as never started, which is only true while the call row is written before the paid request.
+With the row written after it, the simultaneous copy is processed and billed again.
 
 ## Run it
 
@@ -121,7 +137,8 @@ No Docker, no API key, no network beyond npm.
 
 ```bash
 npm ci
-npm test               # 37 tests: 12 webhook/signature, 11 redelivery, 7 window, 2 crash, 5 for the fakes
+npm test               # 53 tests: 12 webhook/signature, 12 redelivery, 10 window, 3 crash,
+                       # 5 for the fakes, 6 start-up validation, 5 Claude adapter
 npm run typecheck
 npm run footgun no-inbox-dedupe
 npm run inspect -- path/to/ledger.db
@@ -129,8 +146,10 @@ npm run inspect -- path/to/ledger.db
 
 Every test opens its own SQLite file under the OS temp dir. The crash test runs the receiver as a
 separate process (`node --import tsx src/main.ts`) that kills itself with `SIGKILL` at
-`FAULT=after_charge`, right after the LLM answered; nothing after that point runs, not even a
-`finally`.
+`FAULT=after_inbox` (right after the inbox insert) or `FAULT=after_charge` (right after the LLM
+answered); nothing after that point runs, not even a `finally`. Each crash test also checks that
+the dead process printed its crash marker and no stack trace, so an uncaught exception cannot pass
+for the crash.
 
 The workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the suite and the
 typecheck on Ubuntu and Windows with Node 22, and the footgun matrix on Ubuntu. **Not yet run in
@@ -138,7 +157,9 @@ CI.**
 
 To run the receiver yourself: `node --import tsx src/main.ts` with the variables listed at the top
 of [`src/main.ts`](src/main.ts) (names only in [`.env.example`](.env.example)). It prints
-`listening on <url>`; the webhook is `<url>/webhook`.
+`listening on <url>`; the webhook is `<url>/webhook`. An unknown `SIDE`, `LLM` or `FAULT`, or an
+empty `GRAPH_API_VERSION`, `PHONE_NUMBER_ID` or `CLOUD_API_TOKEN`, stops it with
+`startup failed: ...` before it opens the database or listens (`test/startup.test.ts`).
 
 ## LIVE
 
@@ -156,7 +177,10 @@ question, then redelivers the booking POST, and prints the structured intents, t
 number of requests sent to Claude (expected 2, not 3) and the outbound messages. `ANTHROPIC_API_KEY`
 comes from the environment or a git-ignored `.env.local`; it is never printed. Without it the script
 prints a skip line and exits 0. The SDK's automatic retries are off: a retried request may be billed
-again, and that decision belongs to the ledger.
+again, and that decision belongs to the ledger. A response without the `propose_booking` call (a
+refusal included) is read as `other`, and the `stop_reason` goes to `llm_calls.note`. The adapter's
+reading of responses is pinned against a local server that answers like the Messages API
+(`test/claude-adapter.test.ts`); that pins this repo's code, not Claude's behaviour.
 
 ### Live: Cloud API
 
@@ -181,7 +205,8 @@ behaviour is **modelled from the documentation, not observed live**.
 - **No human handoff.** Messages that are not booking requests get a fixed answer.
 - **No media.** Non-text messages are recorded as `ignored`.
 - **One template.** It carries the booking slot; a failed text that has no booking gets no fallback.
-- **Only failed statuses are read.** `sent`, `delivered` and `read` statuses are not stored.
+- **Only failed statuses are read.** `sent`, `delivered` and `read` statuses are not stored. A failed
+  status for a `wamid` this ledger did not send goes to `orphan_statuses`; nothing is sent for it.
 - **A crash after the booking and before the reply leaves a `pending` outbound row.** It is visible;
   it is not resent automatically.
 - **The fake Cloud API is modelled from the documentation, not observed live.** Its error text and
@@ -203,8 +228,8 @@ src/cloud-api-client.ts        text and template sends -> accepted | error | unk
 src/llm/provider.ts            LlmProvider.extractIntent and the call outcomes
 src/llm/simulated.ts           client for the fake LLM
 src/llm/claude.ts              Claude adapter (LLM=claude)
-src/main.ts                    the receiver as a process; FAULT=after_charge kills it
-test/*.test.ts                 webhook-signature, redelivery, crash, window, fakes
+src/main.ts                    the receiver as a process; validates its settings; FAULT=... kills it
+test/*.test.ts                 webhook-signature, redelivery, crash, window, fakes, startup, claude-adapter
 test/support/                  fake LLM, fake Cloud API, harness, receiver process
 scripts/live-claude.ts         live run: simulated Cloud API + real Claude
 scripts/live-cloud-api.ts      live run: real Graph API, one text and one template
