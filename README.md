@@ -172,7 +172,53 @@ runs; each says whether it ran.
 
 ### Live: Claude (simulated Cloud API)
 
-**Not run yet.**
+**Run once on 2026-11-07** (21:43 Buenos Aires time, a Saturday; Node 24.16 on Windows 11; model
+`claude-opus-5-5`). Three deliveries, two requests to Claude: the redelivery of the booking POST was
+recorded (`deliveries 2`) and answered from the ledger. Output as printed, without the local path of
+the temporary ledger file:
+
+```text
+model: claude-opus-5-5
+delivery 1 (booking request)      -> HTTP 200
+delivery 2 (unrelated question)   -> HTTP 200
+delivery 3 (same bytes as 1)      -> HTTP 200
+
+requests sent to Claude: 2 (expected 2: the redelivery must not call it)
+
+outbound sent to the simulated Cloud API:
+  text accepted: Booked: 2026-11-10 15:00 for Ana. Reply here if you need to change it.
+  text accepted: I can take bookings. Send for example: book tuesday 15:00
+
+inbox
+  message_id          wa_id          status  deliveries  sent_at                   body
+  ------------------  -------------  ------  ----------  ------------------------  -----------------------------------------
+  wamid.HBgLIN000001  5491155550101  done    2           2026-11-08T00:43:31.000Z  Hi! Could I book Tuesday at 3pm? I'm Ana.
+  wamid.HBgLIN000003  5491155550101  done    1           2026-11-08T00:43:37.000Z  Do you have parking nearby?
+
+llm_calls
+  call_key              status  intent_json                                             note  error
+  --------------------  ------  ------------------------------------------------------  ----  -----
+  wamid.HBgLIN000001:1  done    {"kind":"book","slot":"2026-11-10 15:00","name":"Ana"}  -     -
+  wamid.HBgLIN000003:1  done    {"kind":"other"}                                        -     -
+
+bookings
+  id  inbound_message_id  wa_id          slot              name
+  --  ------------------  -------------  ----------------  ----
+  1   wamid.HBgLIN000001  5491155550101  2026-11-10 15:00  Ana
+
+outbound
+  id  kind   type  status  error_code  fallback_of  wamid                body
+  --  -----  ----  ------  ----------  -----------  -------------------  ------------------------------------------------------------
+  1   reply  text  sent    -           -            wamid.HBgLOUT000002  Booked: 2026-11-10 15:00 for Ana. Reply here if you need to
+  2   reply  text  sent    -           -            wamid.HBgLOUT000004  I can take bookings. Send for example: book tuesday 15:00
+
+orphan_statuses
+  (no rows)
+```
+
+One run with one model and two messages. It shows the adapter's request and its strict tool call
+working against the real Messages API, and the ledger keeping a redelivery away from Claude. It does
+not show how Claude reads other phrasings, other languages or ambiguous dates.
 
 `npm run live:claude` runs the honest receptionist with the simulated Cloud API and the real Claude
 (`LLM=claude`, `src/llm/claude.ts`, Messages API with one strict tool `propose_booking`; the model
