@@ -107,23 +107,23 @@ const plan = [...SCENARIOS, { id: FORGED_ID, goal: FORGED_GOAL }].filter((s) => 
 const results: RunResult[] = [];
 let spent = 0;
 
-console.log(`defender: ${defender}  attacker: ${attackerModel}  scenarios: ${plan.length}  reps: ${reps}  turns: ${maxTurns}`);
-outer: for (const scenario of plan) {
-  for (let rep = 1; rep <= reps; rep += 1) {
-    if (spent > maxTokens) {
-      console.log(`stopped: ${spent} tokens spent, past the cap ${maxTokens}`);
-      break outer;
-    }
-    const usage = { input: 0, output: 0 };
-    let result: RunResult;
-    let driverTokens: { input: number; output: number };
-    if (scenario.id === FORGED_ID) {
-      const driver = new ModelDriver(client, attackerModel, scenario.goal, SYSTEM_OUTSIDER, HTTP_REQUEST, parseHttp);
-      result = await runForged({ driver, maxTurns });
-      driverTokens = { input: driver.inputTokens, output: driver.outputTokens };
-    } else {
-      const driver = new ModelDriver(client, attackerModel, scenario.goal, SYSTEM, SEND_WHATSAPP, parseText);
-      result = await runScenario({
+// Written after every run, so a run that dies (rate limit, overload) keeps everything measured before it.
+mkdirSync(out, { recursive: true });
+const file = join(out, `results-${defender}.json`);
+const save = () => {
+  writeFileSync(file, JSON.stringify({ defender, attacker: attackerModel, reps, maxTurns, tokens: spent, runs: results }, null, 2));
+  writeFileSync(join(out, 'REPORT.md'), renderReport(results, { attacker: attackerModel, defender, reps, maxTurns }));
+};
+
+async function runOne(scenario: { id: string; goal: string }): Promise<RunResult> {
+  const usage = { input: 0, output: 0 };
+  const isForged = scenario.id === FORGED_ID;
+  const driver = isForged
+    ? new ModelDriver(client, attackerModel, scenario.goal, SYSTEM_OUTSIDER, HTTP_REQUEST, parseHttp)
+    : new ModelDriver(client, attackerModel, scenario.goal, SYSTEM, SEND_WHATSAPP, parseText);
+  const result = isForged
+    ? await runForged({ driver: driver as ModelDriver<HttpAttempt>, maxTurns })
+    : await runScenario({
         side: 'honest',
         scenario,
         llm: createClaudeLlm({
@@ -134,15 +134,31 @@ outer: for (const scenario of plan) {
             usage.output += u.outputTokens;
           },
         }),
-        attacker: driver,
+        attacker: driver as ModelDriver<string>,
         maxTurns,
       });
-      driverTokens = { input: driver.inputTokens, output: driver.outputTokens };
+  result.attacker = { ...result.attacker, inputTokens: driver.inputTokens, outputTokens: driver.outputTokens };
+  result.defender = { ...result.defender, tokens: usage };
+  return result;
+}
+
+console.log(`defender: ${defender}  attacker: ${attackerModel}  scenarios: ${plan.length}  reps: ${reps}  turns: ${maxTurns}`);
+outer: for (const scenario of plan) {
+  for (let rep = 1; rep <= reps; rep += 1) {
+    if (spent > maxTokens) {
+      console.log(`stopped: ${spent} tokens spent, past the cap ${maxTokens}`);
+      break outer;
     }
-    result.attacker = { ...result.attacker, inputTokens: driverTokens.input, outputTokens: driverTokens.output };
-    result.defender = { ...result.defender, tokens: usage };
-    spent += driverTokens.input + driverTokens.output + usage.input + usage.output;
+    let result: RunResult;
+    try {
+      result = await runOne(scenario);
+    } catch (err) {
+      console.log(`stopped at ${scenario.id} #${rep}: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`);
+      break outer;
+    }
+    spent += (result.attacker.inputTokens ?? 0) + (result.attacker.outputTokens ?? 0) + (result.defender.tokens?.input ?? 0) + (result.defender.tokens?.output ?? 0);
     results.push(result);
+    save();
     const flags = result.findings.map((f) => `${f.kind}:${f.check}`).join(', ') || 'nothing broke';
     console.log(
       `${scenario.id} #${rep}: ${result.turns.length} msgs, ${result.defender.requests} defender requests` +
@@ -154,10 +170,7 @@ outer: for (const scenario of plan) {
   }
 }
 
-mkdirSync(out, { recursive: true });
-const file = join(out, `results-${defender}.json`);
-writeFileSync(file, JSON.stringify({ defender, attacker: attackerModel, reps, maxTurns, tokens: spent, runs: results }, null, 2));
-writeFileSync(join(out, 'REPORT.md'), renderReport(results, { attacker: attackerModel, defender, reps, maxTurns }));
+save();
 
 const count = (kind: string) => results.filter((r) => r.findings.some((f) => f.kind === kind)).length;
 console.log(
