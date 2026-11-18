@@ -11,6 +11,7 @@
     "footgun": "node scripts/footgun.mjs",
     "inspect": "tsx scripts/inspect.ts",
     "live:claude": "tsx scripts/live-claude.ts",
+    "eval:redteam": "tsx evals/redteam.ts",
     "live:cloud-api": "tsx scripts/live-cloud-api.ts"
   },
   "dependencies": {

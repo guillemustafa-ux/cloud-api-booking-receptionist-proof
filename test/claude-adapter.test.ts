@@ -13,7 +13,10 @@ interface Seen {
   body: any;
 }
 
-async function fakeMessagesApi(answers: { status: number; body: unknown }[]) {
+async function fakeMessagesApi(
+  answers: { status: number; body: unknown }[],
+  onUsage?: (usage: { inputTokens: number; outputTokens: number }) => void,
+) {
   const seen: Seen[] = [];
   const server = createServer(async (req, res) => {
     seen.push({ body: JSON.parse(await readBody(req)) });
@@ -25,7 +28,11 @@ async function fakeMessagesApi(answers: { status: number; body: unknown }[]) {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
-  const llm = createClaudeLlm({ apiKey: 'test-key-not-real', baseURL: `http://127.0.0.1:${(server.address() as AddressInfo).port}` });
+  const llm = createClaudeLlm({
+    apiKey: 'test-key-not-real',
+    baseURL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    ...(onUsage && { onUsage }),
+  });
   return { llm, seen };
 }
 
@@ -74,6 +81,17 @@ describe('Claude adapter', () => {
     expect(err).toBeInstanceOf(LlmCallError);
     expect((err as LlmCallError).outcome).toBe('rejected');
     expect(seen).toHaveLength(1);
+  });
+
+  it('reports the tokens of a response that arrived through onUsage, and none for a failed request', async () => {
+    const usage: unknown[] = [];
+    const ok = await fakeMessagesApi([message('end_turn', [{ type: 'text', text: 'hi' }])], (u) => usage.push(u));
+    await ok.llm.extractIntent(input);
+    expect(usage).toEqual([{ inputTokens: 10, outputTokens: 5 }]);
+
+    const failing = await fakeMessagesApi([{ status: 500, body: { type: 'error', error: { type: 'api_error', message: 'boom' } } }], (u) => usage.push(u));
+    await failing.llm.extractIntent(input).catch(() => undefined);
+    expect(usage).toHaveLength(1);
   });
 });
 

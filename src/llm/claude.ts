@@ -39,7 +39,13 @@ const PROPOSE_BOOKING = {
  * The SDK's automatic retries are off (`maxRetries: 0`): a retried request that already reached
  * the API may be billed again, and that decision belongs to the receptionist's ledger.
  */
-export function createClaudeLlm(opts: { apiKey: string; model?: string; baseURL?: string }): LlmProvider {
+export function createClaudeLlm(opts: {
+  apiKey: string;
+  model?: string;
+  baseURL?: string;
+  /** Called with the tokens of every response that arrived, so a run can count what it was billed. */
+  onUsage?: (usage: { inputTokens: number; outputTokens: number }) => void;
+}): LlmProvider {
   const client = new Anthropic({ apiKey: opts.apiKey, maxRetries: 0, ...(opts.baseURL && { baseURL: opts.baseURL }) });
   const model = opts.model || DEFAULT_ANTHROPIC_MODEL;
 
@@ -67,6 +73,7 @@ export function createClaudeLlm(opts: { apiKey: string; model?: string; baseURL?
         throw err;
       }
 
+      opts.onUsage?.({ inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens });
       const call = response.content.find((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === PROPOSE_BOOKING.name);
       if (response.stop_reason === 'refusal' || !call) {
         return { kind: 'other', note: `stop_reason=${response.stop_reason}; ${call ? 'propose_booking called' : 'no propose_booking call'}` };

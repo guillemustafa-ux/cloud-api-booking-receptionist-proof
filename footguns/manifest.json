@@ -8,7 +8,8 @@
       "rejects body changed after signing",
       "rejects signed with another secret",
       "rejects header without the sha256= prefix",
-      "a receiver with no APP_SECRET configured accepts nothing"
+      "a receiver with no APP_SECRET configured accepts nothing",
+      "redteam forged_webhook"
     ]
   },
   "no-inbox-dedupe": {
@@ -18,7 +19,11 @@
       "(c) honest",
       "(d) honest",
       "(e) honest",
-      "(n) honest"
+      "(n) honest",
+      "honest side + a model that behaves",
+      "honest side + a model that echoes",
+      "honest side: the victim slot is confirmed",
+      "honest side: a model that fails every request"
     ]
   },
   "ledger-after-call": {
